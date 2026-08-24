@@ -30,9 +30,12 @@ therefore outputs use the term `two_channel` rather than `bilateral`.
 - No automatically detected suppression-like segment (absolute 0.5-45 Hz
   filtered amplitude <=5 uV for >=0.5 seconds) in either channel.
 - Alpha magnitude, prominence, slope, and shape are never used for selection.
-- Absolute spectral power is reported for delta (0.5-4 Hz), theta (4-8 Hz),
-  alpha (8-12 Hz), and beta (12-25 Hz), separately for EEG1, EEG2, and the
-  two-channel linear-power average, expressed in dB.
+- Absolute spectral power is reported using the monitor display boundaries:
+  delta (0.5-4 Hz), theta (4-8 Hz), alpha (8-13 Hz), and beta (13-30 Hz), separately for EEG1,
+  EEG2, and the two-channel linear-power average, expressed in dB.
+- Because epoch means are removed and preprocessing uses a 0.5-Hz high-pass,
+  the delta band begins at 0.5 Hz. DC (0 Hz) is not counted
+  as physiological EEG power.
 
 Amplitude and suppression thresholds are operational rules and require
 validation against the blinded review set. They are not presented as a

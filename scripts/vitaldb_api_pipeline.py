@@ -56,9 +56,9 @@ class Config:
     theta_low_hz: float = 4
     theta_high_hz: float = 8
     alpha_low_hz: float = 8
-    alpha_high_hz: float = 12
-    beta_low_hz: float = 12
-    beta_high_hz: float = 25
+    alpha_high_hz: float = 13
+    beta_low_hz: float = 13
+    beta_high_hz: float = 30
     time_bandwidth: float = 3
     tapers: int = 5
     outcome_memory_sec: int = 63
