@@ -26,8 +26,8 @@ def main() -> None:
     reviews=pd.read_csv(a.reviews,dtype=str); key=pd.read_csv(a.key)
     d=reviews.merge(key,on="validation_id",how="inner")
     usable=d.loc[d.both_channels_interpretable.astype(str).str.upper().isin(["Y","YES","1"])]
-    rows=[metrics(usable.loc[usable.validation_set_x.eq("representative_random")],"primary_representative_random"),
-          metrics(usable.loc[usable.validation_set_x.eq("boundary_5_to_15")],"boundary_sensitivity_analysis")]
+    rows=[metrics(usable.loc[usable.validation_set.eq("representative_random")],"primary_representative_random"),
+          metrics(usable.loc[usable.validation_set.eq("boundary_5_to_15")],"boundary_sensitivity_analysis")]
     pd.DataFrame(rows).to_csv(out/"diagnostic_accuracy.csv",index=False)
     d.to_csv(out/"adjudication_merged_restricted.csv",index=False)
 

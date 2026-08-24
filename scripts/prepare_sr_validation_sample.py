@@ -44,7 +44,7 @@ def main() -> None:
     keep = ["validation_id", "validation_set", "caseid", "post_outcome_start_sec", "post_outcome_end_sec",
             "post_max_sr", "post_mean_sr", "post_sr10", "post_valid_sec", "pre_sr10", "random_seed"]
     sample[keep].sort_values(["validation_set", "validation_id"]).to_csv(out / "restricted_sample_manifest.csv", index=False)
-    blinded = sample[["validation_id", "validation_set"]].copy()
+    blinded = sample[["validation_id"]].copy()
     blinded["image_file"] = "images/" + blinded.validation_id + ".png"
     blinded["both_channels_interpretable"] = ""
     blinded["artifact_present"] = ""
@@ -53,7 +53,7 @@ def main() -> None:
     blinded["suppression_fraction_category"] = ""
     blinded["reviewer_confidence"] = ""
     blinded["comment"] = ""
-    blinded.sort_values(["validation_set", "validation_id"]).to_csv(out / "reviewer_form_blinded.csv", index=False)
+    blinded.sort_values("validation_id").to_csv(out / "reviewer_form_blinded.csv", index=False)
     counts = sample.groupby(["validation_set", "post_sr10"]).size().rename("n").reset_index()
     counts.to_csv(out / "sample_counts_restricted.csv", index=False)
 
