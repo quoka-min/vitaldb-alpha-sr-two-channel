@@ -1,0 +1,39 @@
+name: Summarize completed VitalDB run
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed source workflow run ID"
+        required: true
+        default: "32686146633"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Download merged source artifact
+        run: gh run download "${{ inputs.source_run_id }}" -n vitaldb-fresh-api-merged --dir source
+      - name: Create compact preliminary analysis
+        run: |
+          python scripts/summarize_preliminary.py \
+            --cohort source/cohort_fresh_vitaldb_api.csv \
+            --out preliminary_analysis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitaldb-preliminary-analysis
+          path: preliminary_analysis/
+          retention-days: 30
