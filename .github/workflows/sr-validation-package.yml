@@ -1,0 +1,110 @@
+name: Build blinded manufacturer-SR validation package
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Completed VitalDB extraction run"
+        required: true
+        default: "32686146633"
+      shard_count:
+        description: "Parallel image-generation shards"
+        required: true
+        default: "24"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - run: pip install pandas==2.2.3 numpy==2.1.3
+      - run: gh run download "${{ inputs.source_run_id }}" -n vitaldb-fresh-api-merged --dir source
+      - run: python scripts/prepare_sr_validation_sample.py --cohort source/cohort_fresh_vitaldb_api.csv --out sample
+      - id: matrix
+        shell: python
+        env: {SHARDS: "${{ inputs.shard_count }}"}
+        run: |
+          import json, os
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('value='+json.dumps({'shard':list(range(int(os.environ['SHARDS'])))})+'\n')
+      - uses: actions/upload-artifact@v4
+        with: {name: sr-validation-sample, path: sample/, retention-days: 30}
+
+  render:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with: {name: sr-validation-sample, path: sample}
+      - name: Render blinded validation records
+        env: {SHARD: "${{ matrix.shard }}", SHARDS: "${{ inputs.shard_count }}"}
+        run: |
+          python scripts/build_sr_validation_images.py --manifest sample/restricted_sample_manifest.csv \
+            --out "work/shard_${SHARD}" --cache "cache/shard_${SHARD}" \
+            --shard-index "$SHARD" --shard-count "$SHARDS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: sr-validation-shard-${{ matrix.shard }}, path: work/shard_${{ matrix.shard }}/, retention-days: 30}
+
+  merge:
+    if: always()
+    needs: [prepare, render]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: pip}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with: {name: sr-validation-sample, path: sample}
+      - uses: actions/download-artifact@v4
+        with: {pattern: sr-validation-shard-*, path: shards}
+      - name: Assemble reviewer and restricted packages
+        shell: python
+        run: |
+          import json, shutil
+          from pathlib import Path
+          import pandas as pd
+          out=Path('merged'); blind=out/'BLINDED_REVIEW_SET'; restricted=out/'RESTRICTED_MANUFACTURER_KEY'
+          (blind/'images').mkdir(parents=True); restricted.mkdir(parents=True)
+          shutil.copy('sample/reviewer_form_blinded.csv',blind/'reviewer_form_blinded.csv')
+          shutil.copy('sample/sample_counts_restricted.csv',restricted/'sample_counts_restricted.csv')
+          shutil.copy('sample/restricted_sample_manifest.csv',restricted/'restricted_sample_manifest.csv')
+          keys=[]; failures=[]
+          for f in Path('shards').glob('**/restricted_manufacturer_key.csv'):
+              try: keys.append(pd.read_csv(f))
+              except pd.errors.EmptyDataError: pass
+          for f in Path('shards').glob('**/failures.csv'):
+              try:
+                  x=pd.read_csv(f)
+                  if len(x): failures.append(x)
+              except pd.errors.EmptyDataError: pass
+          key=pd.concat(keys,ignore_index=True).drop_duplicates('validation_id') if keys else pd.DataFrame()
+          key.to_csv(restricted/'manufacturer_sr_answer_key.csv',index=False)
+          (pd.concat(failures,ignore_index=True) if failures else pd.DataFrame()).to_csv(restricted/'failures.csv',index=False)
+          for f in Path('shards').glob('**/images/*.png'): shutil.copy(f,blind/'images'/f.name)
+          instructions='''# Blinded raw-EEG adjudication\n\nDo not access the RESTRICTED_MANUFACTURER_KEY folder before locking reviewer decisions.\nFor each 63-second EEG record, enter Y/N/uncertain for physiologic suppression and whether the raw-EEG suppression fraction is at least 10%.\nThe manufacturer SR is the index test, not the ground-truth answer. The blinded human decision is the reference standard.\nPrimary diagnostic accuracy uses only representative_random records. boundary_5_to_15 records are a separate threshold sensitivity analysis.\n'''
+          (blind/'README_REVIEWER.md').write_text(instructions,encoding='utf-8')
+          summary={'requested':400,'images':len(list((blind/'images').glob('*.png'))),'key_rows':len(key),'failures':sum(len(x) for x in failures)}
+          (out/'PACKAGE_SUMMARY.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+      - name: Create synthetic pre-review training examples
+        run: python scripts/make_synthetic_sr_training.py --out merged/SYNTHETIC_TRAINING_EXAMPLES
+      - uses: actions/upload-artifact@v4
+        with: {name: sr-validation-complete-package, path: merged/, retention-days: 30, compression-level: 6}
