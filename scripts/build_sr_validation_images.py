@@ -60,8 +60,12 @@ def main() -> None:
             pv = valid.loc[valid.valid & np.isfinite(valid.value)].copy()
             if pv.empty: raise RuntimeError("No quality-valid SR sample in outcome interval")
             peak = pv.loc[pv.value.idxmax()]
-            end = float(peak.time); start = max(float(r.post_outcome_start_sec), end - CFG.outcome_memory_sec)
-            if end - start < CFG.outcome_memory_sec - 1: raise RuntimeError("Less than 62 seconds available")
+            # The manufacturer value summarizes its preceding memory window.
+            # post_outcome_start already equals alpha-window end + memory length,
+            # so using end-memory never overlaps the exposure window.
+            end = float(peak.time); start = end - CFG.outcome_memory_sec
+            if start < 0 or end - start < CFG.outcome_memory_sec - 1:
+                raise RuntimeError("Less than 62 seconds available")
             make_image(out / "images" / f"{r.validation_id}.png", r.validation_id, raw1, raw2, sqi, start, end)
             key_rows.append({"validation_id": r.validation_id, "validation_set": r.validation_set, "caseid": cid,
                              "segment_start_sec": start, "segment_end_sec": end,
