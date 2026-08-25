@@ -7,6 +7,18 @@ on:
         description: "Completed source workflow run ID"
         required: true
         default: "32686146633"
+      source_artifact_name:
+        description: "Merged artifact name from the source run"
+        required: true
+        default: "vitaldb-bilateral-v2-merged"
+      source_cohort_file:
+        description: "Cohort CSV filename inside the merged artifact"
+        required: true
+        default: "cohort_bilateral_v2_pending_review.csv"
+      output_artifact_name:
+        description: "Name for the compact summary artifact"
+        required: true
+        default: "vitaldb-bilateral-v2-compact"
 
 permissions:
   actions: read
@@ -26,14 +38,24 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Download merged source artifact
-        run: gh run download "${{ inputs.source_run_id }}" -n vitaldb-fresh-api-merged --dir source
+        run: >-
+          gh run download "${{ inputs.source_run_id }}"
+          -n "${{ inputs.source_artifact_name }}"
+          --dir source
       - name: Create compact preliminary analysis
         run: |
           python scripts/summarize_preliminary.py \
-            --cohort source/cohort_fresh_vitaldb_api.csv \
+            --cohort "source/${{ inputs.source_cohort_file }}" \
             --out preliminary_analysis
+      - name: Preserve compact protocol and blinded-review metadata
+        shell: bash
+        run: |
+          mkdir -p preliminary_analysis/source_metadata
+          cp source/merge_summary.json preliminary_analysis/source_metadata/merge_summary.json
+          cp source/reviewer_form_blinded.csv preliminary_analysis/source_metadata/reviewer_form_blinded.csv
+          cp source/restricted_key_do_not_share_with_reviewers.csv preliminary_analysis/source_metadata/restricted_key_do_not_share_with_reviewers.csv
       - uses: actions/upload-artifact@v4
         with:
-          name: vitaldb-preliminary-analysis
+          name: ${{ inputs.output_artifact_name }}
           path: preliminary_analysis/
           retention-days: 30
