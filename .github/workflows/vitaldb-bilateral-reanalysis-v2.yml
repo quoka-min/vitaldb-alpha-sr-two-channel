@@ -1,0 +1,92 @@
+name: VitalDB bilateral suppression-like reanalysis v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_count:
+        description: "Number of parallel shards"
+        required: true
+        default: "24"
+      smoke_limit:
+        description: "Cases per shard; 0 means all assigned cases"
+        required: true
+        default: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - id: matrix
+        shell: python
+        env:
+          SHARDS: ${{ inputs.shard_count }}
+        run: |
+          import json, os
+          n = int(os.environ["SHARDS"])
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("value=" + json.dumps({"shard": list(range(n))}) + "\n")
+
+  extract:
+    needs: prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Fresh VitalDB API bilateral-v2 extraction
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ inputs.shard_count }}
+          LIMIT: ${{ inputs.smoke_limit }}
+        run: |
+          extra=""
+          if [ "$LIMIT" != "0" ]; then extra="--limit $LIMIT"; fi
+          python scripts/vitaldb_api_pipeline_bilateral_v2.py \
+            --out "work_bilateral_v2/shard_${SHARD}" \
+            --cache "cache_bilateral_v2/shard_${SHARD}" \
+            --shard-index "$SHARD" --shard-count "$SHARDS" $extra
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vitaldb-bilateral-v2-shard-${{ matrix.shard }}
+          path: work_bilateral_v2/shard_${{ matrix.shard }}/
+          retention-days: 30
+          compression-level: 6
+
+  merge:
+    if: always()
+    needs: extract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas==2.2.3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vitaldb-bilateral-v2-shard-*
+          path: downloaded_bilateral_v2
+      - run: >-
+          python scripts/merge_shards_bilateral_v2.py
+          --input downloaded_bilateral_v2
+          --out merged_bilateral_v2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitaldb-bilateral-v2-merged
+          path: merged_bilateral_v2/
+          retention-days: 30
+          compression-level: 6
