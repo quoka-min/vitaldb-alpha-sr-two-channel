@@ -1,6 +1,8 @@
 cache/
 work/
 results/
+smoke_*/
+fresh_cache_*/
 *.pyc
 __pycache__/
 

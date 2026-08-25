@@ -1,0 +1,170 @@
+name: VitalDB Shao-adapted fixed120 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_count:
+        description: "Parallel extraction shards"
+        required: true
+        default: "24"
+      smoke_limit:
+        description: "Cases per shard; 0 runs every assigned case"
+        required: true
+        default: "0"
+  push:
+    branches:
+      - codex/shao-adapted-maintenance-v1
+    paths:
+      - "scripts/vitaldb_shao_adapted_v1.py"
+      - "scripts/merge_shao_adapted_v1.py"
+      - "scripts/analyze_shao_adapted_v1.py"
+      - "scripts/test_shao_adapted_v1.py"
+      - "scripts/test_analyze_shao_adapted_v1.py"
+      - ".github/workflows/vitaldb-shao-adapted-v1.yml"
+      - "SHAO_ADAPTED_FIXED120_V1.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vitaldb-shao-adapted-v1-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Protocol and analysis regression tests
+        run: |
+          python scripts/test_shao_adapted_v1.py -v
+          python scripts/test_analyze_shao_adapted_v1.py -v
+
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+      shard_count: ${{ steps.matrix.outputs.shard_count }}
+      pseudonym_salt: ${{ steps.salt.outputs.value }}
+    steps:
+      - id: matrix
+        shell: python
+        env:
+          SHARDS: ${{ github.event.inputs.shard_count || '24' }}
+        run: |
+          import json, os
+          n = int(os.environ["SHARDS"])
+          if n < 1 or n > 64:
+              raise SystemExit("shard_count must be 1..64")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write("value=" + json.dumps({"shard": list(range(n))}) + "\n")
+              handle.write(f"shard_count={n}\n")
+      - id: salt
+        shell: bash
+        run: |
+          value="$(openssl rand -hex 32)"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+  extract:
+    needs: [test, prepare-matrix]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Fresh VitalDB API fixed-window extraction
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: ${{ needs.prepare-matrix.outputs.shard_count }}
+          LIMIT: ${{ github.event.inputs.smoke_limit || '0' }}
+          PSEUDONYM_SALT: ${{ needs.prepare-matrix.outputs.pseudonym_salt }}
+        run: |
+          extra=""
+          if [ "$LIMIT" != "0" ]; then extra="--limit $LIMIT"; fi
+          python scripts/vitaldb_shao_adapted_v1.py \
+            --out "work_shao_v1/shard_${SHARD}" \
+            --cache "fresh_cache_shao_v1/shard_${SHARD}" \
+            --shard-index "$SHARD" \
+            --shard-count "$SHARDS" \
+            --salt "$PSEUDONYM_SALT" \
+            $extra
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shao-fixed120-v1-shard-${{ matrix.shard }}
+          path: work_shao_v1/shard_${{ matrix.shard }}/
+          retention-days: 30
+          compression-level: 6
+
+  merge-and-analyze:
+    needs: [prepare-matrix, extract]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shao-fixed120-v1-shard-*
+          path: downloaded_shao_v1
+      - name: Validate and merge every shard
+        run: >-
+          python scripts/merge_shao_adapted_v1.py
+          --input downloaded_shao_v1
+          --out merged_shao_v1
+          --expected-shards "${{ needs.prepare-matrix.outputs.shard_count }}"
+      - name: Provisional automatic-candidate analysis
+        run: >-
+          python scripts/analyze_shao_adapted_v1.py
+          --input merged_shao_v1/cohort_all_fixed_window.csv
+          --out merged_shao_v1/analysis_provisional
+      - name: Separate blinded and restricted deliverables
+        shell: bash
+        run: |
+          mkdir -p deliverables/data_and_analysis deliverables/blinded_review deliverables/restricted_key
+          cp merged_shao_v1/cohort_all_fixed_window.csv deliverables/data_and_analysis/
+          cp merged_shao_v1/automatic_candidates_provisional.csv deliverables/data_and_analysis/
+          cp merged_shao_v1/data_dictionary.csv deliverables/data_and_analysis/
+          cp merged_shao_v1/merge_summary.json deliverables/data_and_analysis/
+          cp merged_shao_v1/README_KO.md deliverables/data_and_analysis/
+          cp -r merged_shao_v1/analysis_provisional deliverables/data_and_analysis/
+          cp merged_shao_v1/reviewer_form_blinded.csv deliverables/blinded_review/
+          cp -r merged_shao_v1/blinded_review_images deliverables/blinded_review/
+          cp merged_shao_v1/restricted_key_do_not_share_with_reviewers.csv deliverables/restricted_key/
+          cp merged_shao_v1/data_dictionary.csv deliverables/restricted_key/
+          cp merged_shao_v1/README_KO.md deliverables/restricted_key/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shao-fixed120-v1-data-and-analysis
+          path: deliverables/data_and_analysis/
+          retention-days: 30
+          compression-level: 6
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shao-fixed120-v1-blinded-review
+          path: deliverables/blinded_review/
+          retention-days: 30
+          compression-level: 6
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shao-fixed120-v1-restricted-key
+          path: deliverables/restricted_key/
+          retention-days: 30
+          compression-level: 6
