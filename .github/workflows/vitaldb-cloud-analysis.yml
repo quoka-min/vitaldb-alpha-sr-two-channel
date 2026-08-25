@@ -45,7 +45,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: Fresh VitalDB API extraction
+      - name: Fresh VitalDB API bilateral-v2 extraction
         shell: bash
         env:
           SHARD: ${{ matrix.shard }}
@@ -54,15 +54,15 @@ jobs:
         run: |
           extra=""
           if [ "$LIMIT" != "0" ]; then extra="--limit $LIMIT"; fi
-          python scripts/vitaldb_api_pipeline.py \
-            --out "work/shard_${SHARD}" \
-            --cache "cache/shard_${SHARD}" \
+          python scripts/vitaldb_api_pipeline_bilateral_v2.py \
+            --out "work_bilateral_v2/shard_${SHARD}" \
+            --cache "cache_bilateral_v2/shard_${SHARD}" \
             --shard-index "$SHARD" --shard-count "$SHARDS" $extra
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vitaldb-shard-${{ matrix.shard }}
-          path: work/shard_${{ matrix.shard }}/
+          name: vitaldb-bilateral-v2-shard-${{ matrix.shard }}
+          path: work_bilateral_v2/shard_${{ matrix.shard }}/
           retention-days: 30
           compression-level: 6
 
@@ -78,13 +78,15 @@ jobs:
       - run: pip install pandas==2.2.3
       - uses: actions/download-artifact@v4
         with:
-          pattern: vitaldb-shard-*
-          path: downloaded
-      - run: python scripts/merge_shards.py --input downloaded --out merged
+          pattern: vitaldb-bilateral-v2-shard-*
+          path: downloaded_bilateral_v2
+      - run: >-
+          python scripts/merge_shards_bilateral_v2.py
+          --input downloaded_bilateral_v2
+          --out merged_bilateral_v2
       - uses: actions/upload-artifact@v4
         with:
-          name: vitaldb-fresh-api-merged
-          path: merged/
+          name: vitaldb-bilateral-v2-merged
+          path: merged_bilateral_v2/
           retention-days: 30
           compression-level: 6
-
