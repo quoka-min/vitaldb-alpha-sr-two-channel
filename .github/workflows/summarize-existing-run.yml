@@ -51,6 +51,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p preliminary_analysis/source_metadata
+          cp "source/${{ inputs.source_cohort_file }}" preliminary_analysis/source_metadata/cohort_all_v2_source.csv
           cp source/merge_summary.json preliminary_analysis/source_metadata/merge_summary.json
           cp source/reviewer_form_blinded.csv preliminary_analysis/source_metadata/reviewer_form_blinded.csv
           cp source/restricted_key_do_not_share_with_reviewers.csv preliminary_analysis/source_metadata/restricted_key_do_not_share_with_reviewers.csv
